@@ -1,36 +1,100 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Office Tracker
 
-## Getting Started
+A team office-day tracker. Each team member marks the days they were in the office, and the app reports their progress against the **60% of workable days** policy. Workable days = weekdays in the month minus public holidays (Ireland or Netherlands for v1) minus PTO.
 
-First, run the development server:
+## Stack
+
+- Next.js (App Router) + TypeScript
+- Tailwind + shadcn/ui
+- DynamoDB (DynamoDB Local for dev, AWS DynamoDB for prod)
+- `date-holidays` for bank holidays
+
+## First-time setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.local.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`.env.local` defaults point at DynamoDB Local on `localhost:8000`. No AWS credentials are needed for local dev.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Run locally
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+You need Docker for DynamoDB Local.
 
-## Learn More
+```bash
+npm run db:up      # starts DynamoDB Local in Docker (port 8000)
+npm run db:init    # creates the "office_tracker" table
+npm run dev        # starts Next.js on http://localhost:3000
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open <http://localhost:3000>, enter your email, pick your country, and start marking in-office days. Data persists across restarts via the `dynamodb-data` Docker volume.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run db:down    # stop DynamoDB Local when you're done
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Point at real AWS DynamoDB
 
-## Deploy on Vercel
+1. Create the table in AWS (one-time):
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+   ```bash
+   DYNAMODB_ENDPOINT="" \
+   AWS_REGION=eu-west-1 \
+   AWS_ACCESS_KEY_ID=... \
+   AWS_SECRET_ACCESS_KEY=... \
+   npm run db:init
+   ```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+2. Update `.env.local`:
+
+   ```env
+   DYNAMODB_TABLE=office_tracker
+   AWS_REGION=eu-west-1
+   # remove DYNAMODB_ENDPOINT (or leave it empty) so the SDK uses the real AWS endpoint
+   AWS_ACCESS_KEY_ID=...
+   AWS_SECRET_ACCESS_KEY=...
+   ```
+
+The table uses on-demand billing and a simple `PK`/`SK` schema, so it fits comfortably in the DynamoDB free tier for a small team.
+
+## Data model
+
+Single item per user in the `office-tracker` table:
+
+- Partition key attribute: `office-tracker` (String), value = the user's email.
+- Item shape:
+
+  ```json
+  {
+    "office-tracker": "alice@example.com",
+    "email": "alice@example.com",
+    "country": "IE",
+    "createdAt": "2026-05-13T09:00:00.000Z",
+    "months": {
+      "2026-05": {
+        "ptoDays": 3,
+        "inOfficeDates": ["2026-05-06", "2026-05-07"],
+        "updatedAt": "2026-05-13T09:30:00.000Z"
+      }
+    }
+  }
+  ```
+
+All of a user's data lives in this one item, so every read/write is a single `GetItem`/`UpdateItem`.
+
+## How the math works
+
+For a given month:
+
+```
+workableDays  = weekdays − publicHolidays − ptoDays
+targetDays    = ceil(workableDays × 0.6)
+onTrack       = inOfficeCount ≥ targetDays
+```
+
+Weekend, holiday, and out-of-month dates are filtered out of `inOfficeDates` before they count.
+
+## Auth model
+
+Anyone with the URL can sign in by entering their email. There's no password — the data is non-sensitive and this is intended for an internal team. The email is stored in an HttpOnly cookie and used as the DynamoDB partition key.
