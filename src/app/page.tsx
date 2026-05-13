@@ -34,7 +34,7 @@ export default async function Home() {
   });
 
   return (
-    <main className="relative flex-1 px-6 py-10 bg-slate-950 overflow-hidden">
+    <main className="relative flex-1 px-6 py-5 bg-slate-950 overflow-hidden">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 -z-0 h-[480px] bg-[radial-gradient(ellipse_60%_50%_at_50%_0%,rgba(99,102,241,0.18),transparent_70%)]"

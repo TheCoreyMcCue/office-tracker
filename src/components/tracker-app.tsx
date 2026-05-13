@@ -28,6 +28,7 @@ import {
   type MonthStats,
 } from "@/lib/calendar";
 import type { MonthRecord, UserProfile } from "@/lib/repo";
+import { cn } from "@/lib/utils";
 import { MonthCalendar } from "./month-calendar";
 import { SummaryCard } from "./summary-card";
 
@@ -152,10 +153,10 @@ export function TrackerApp({
     profile.country;
 
   const panelClass =
-    "relative rounded-2xl bg-slate-900/70 backdrop-blur-xl ring-1 ring-white/10 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.6)] p-6";
+    "relative rounded-2xl bg-slate-900/70 backdrop-blur-xl ring-1 ring-white/10 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.6)] p-5";
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8">
+    <div className="mx-auto max-w-5xl space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="relative h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center shadow-[0_0_24px_-4px_rgba(99,102,241,0.6)] ring-1 ring-white/20">
@@ -233,20 +234,20 @@ export function TrackerApp({
         )}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-        <div className={panelClass}>
+      <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
+        <div className={cn(panelClass, "flex flex-col")}>
           <div
             aria-hidden
             className="pointer-events-none absolute inset-x-6 -top-px h-px bg-gradient-to-r from-transparent via-white/20 to-transparent"
           />
-          <div className="mb-5">
+          <div className="mb-3">
             <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Calendar
             </div>
-            <h2 className="text-lg font-semibold text-white mt-1.5">
+            <h2 className="text-lg font-semibold text-white mt-1">
               Mark in-office days
             </h2>
-            <p className="text-sm text-slate-300 mt-1">
+            <p className="text-sm text-slate-300">
               Click any weekday to toggle. Weekends and holidays are excluded.
             </p>
           </div>
@@ -259,11 +260,11 @@ export function TrackerApp({
           />
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           <SummaryCard stats={stats} />
 
           <div className={panelClass}>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-3">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                   PTO this month
@@ -303,7 +304,7 @@ export function TrackerApp({
 
           {stats.holidays.length > 0 && (
             <div className={panelClass}>
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-3">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                     Public holidays

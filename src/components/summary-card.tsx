@@ -12,11 +12,11 @@ export function SummaryCard({ stats }: { stats: MonthStats }) {
   const onTrack = stats.onTrack;
 
   return (
-    <div className="relative rounded-2xl bg-slate-900/70 backdrop-blur-xl ring-1 ring-white/10 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.6)] p-6 overflow-hidden">
+    <div className="relative rounded-2xl bg-slate-900/70 backdrop-blur-xl ring-1 ring-white/10 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.6)] p-5 overflow-hidden">
       <div
         aria-hidden
         className={cn(
-          "pointer-events-none absolute inset-x-6 -top-px h-px bg-gradient-to-r from-transparent to-transparent",
+          "pointer-events-none absolute inset-x-5 -top-px h-px bg-gradient-to-r from-transparent to-transparent",
           onTrack ? "via-emerald-400/60" : "via-indigo-400/60",
         )}
       />
@@ -55,7 +55,7 @@ export function SummaryCard({ stats }: { stats: MonthStats }) {
         </span>
       </div>
 
-      <div className="relative mt-7 flex items-center gap-6">
+      <div className="relative mt-5 flex items-center gap-5">
         <ProgressRing
           ratio={ringPct}
           onTrack={onTrack}
@@ -79,7 +79,7 @@ export function SummaryCard({ stats }: { stats: MonthStats }) {
         </div>
       </div>
 
-      <dl className="relative mt-7 grid grid-cols-3 gap-4 pt-5 border-t border-white/10">
+      <dl className="relative mt-5 grid grid-cols-3 gap-4 pt-4 border-t border-white/10">
         <Stat label="Holidays" value={stats.holidays.length} />
         <Stat label="PTO" value={stats.ptoDays} />
         <Stat label="Workable" value={stats.workableDays} accent />
@@ -97,8 +97,8 @@ function ProgressRing({
   onTrack: boolean;
   centerLabel: string;
 }) {
-  const size = 104;
-  const stroke = 8;
+  const size = 88;
+  const stroke = 7;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const offset = c * (1 - ratio);
@@ -168,7 +168,7 @@ function Stat({
       </dt>
       <dd
         className={cn(
-          "mt-1.5 text-2xl font-semibold tabular-nums tracking-tight",
+          "mt-1 text-2xl font-semibold tabular-nums tracking-tight",
           accent ? "text-indigo-300" : "text-white",
         )}
       >

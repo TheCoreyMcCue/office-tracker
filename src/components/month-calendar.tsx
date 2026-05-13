@@ -31,19 +31,23 @@ export function MonthCalendar({
 
   const firstDay = new Date(year, month, 1).getDay();
   const leadingBlanks = (firstDay + 6) % 7;
+  const rowCount = Math.ceil((leadingBlanks + days.length) / 7);
 
   const today = toISODate(new Date());
 
   return (
-    <div>
-      <div className="grid grid-cols-7 gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
+    <div className="flex flex-1 flex-col min-h-0">
+      <div className="grid grid-cols-7 gap-1 text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
         {WEEKDAYS.map((d) => (
           <div key={d} className="text-center">
             {d}
           </div>
         ))}
       </div>
-      <div className="grid grid-cols-7 gap-1.5">
+      <div
+        className="grid grid-cols-7 gap-1 flex-1 min-h-0"
+        style={{ gridTemplateRows: `repeat(${rowCount}, minmax(0, 1fr))` }}
+      >
         {Array.from({ length: leadingBlanks }).map((_, i) => (
           <div key={`blank-${i}`} />
         ))}
@@ -72,7 +76,7 @@ export function MonthCalendar({
                       : "Click to mark as in-office"
               }
               className={cn(
-                "group relative aspect-square rounded-xl text-base flex flex-col items-center justify-center transition-all duration-150 p-1",
+                "group relative min-h-12 rounded-xl text-base flex flex-col items-center justify-center transition-all duration-150 p-1",
                 "focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900",
                 weekend &&
                   "bg-slate-900/40 text-slate-500 cursor-not-allowed ring-1 ring-white/5",
@@ -108,7 +112,7 @@ export function MonthCalendar({
         })}
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-300">
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-300">
         <LegendSwatch
           className="bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-[0_0_8px_-1px_rgba(52,211,153,0.6)]"
           label="In office"
