@@ -5,6 +5,7 @@ import {
   getUserProfile,
   setInOfficeDates,
   setPtoDays,
+  setSickDays,
 } from "@/lib/repo";
 import { computeMonthStats, parseMonthKey } from "@/lib/calendar";
 
@@ -35,6 +36,7 @@ export async function GET(
     month,
     country: profile.country,
     ptoDays: record?.ptoDays ?? 0,
+    sickDays: record?.sickDays ?? 0,
     inOfficeDates: record?.inOfficeDates ?? [],
   });
   return NextResponse.json({
@@ -43,6 +45,7 @@ export async function GET(
       email,
       monthKey,
       ptoDays: 0,
+      sickDays: 0,
       inOfficeDates: [],
       updatedAt: null,
     },
@@ -68,12 +71,16 @@ export async function PUT(
   }
   const body = (await req.json().catch(() => null)) as {
     ptoDays?: number;
+    sickDays?: number;
     inOfficeDates?: string[];
   } | null;
 
   let record = await getMonthRecord(email, monthKey);
   if (typeof body?.ptoDays === "number") {
     record = await setPtoDays(email, monthKey, body.ptoDays);
+  }
+  if (typeof body?.sickDays === "number") {
+    record = await setSickDays(email, monthKey, body.sickDays);
   }
   if (Array.isArray(body?.inOfficeDates)) {
     record = await setInOfficeDates(email, monthKey, body.inOfficeDates);
@@ -85,6 +92,7 @@ export async function PUT(
     month,
     country: profile.country,
     ptoDays: record?.ptoDays ?? 0,
+    sickDays: record?.sickDays ?? 0,
     inOfficeDates: record?.inOfficeDates ?? [],
   });
   return NextResponse.json({ profile, record, stats });

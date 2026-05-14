@@ -30,6 +30,7 @@ export default async function Home() {
     month: now.getMonth(),
     country: profile.country,
     ptoDays: record?.ptoDays ?? 0,
+    sickDays: record?.sickDays ?? 0,
     inOfficeDates: record?.inOfficeDates ?? [],
   });
 
@@ -52,6 +53,7 @@ export default async function Home() {
             email: profile.email,
             monthKey: currentKey,
             ptoDays: 0,
+            sickDays: 0,
             inOfficeDates: [],
             updatedAt: "",
           }

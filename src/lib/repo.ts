@@ -12,12 +12,14 @@ export type MonthRecord = {
   email: string;
   monthKey: string;
   ptoDays: number;
+  sickDays: number;
   inOfficeDates: string[];
   updatedAt: string;
 };
 
 type StoredMonth = {
   ptoDays?: number;
+  sickDays?: number;
   inOfficeDates?: string[];
   updatedAt?: string;
 };
@@ -55,6 +57,7 @@ function toMonthRecord(
     email,
     monthKey,
     ptoDays: stored?.ptoDays ?? 0,
+    sickDays: stored?.sickDays ?? 0,
     inOfficeDates: (stored?.inOfficeDates ?? []).slice().sort(),
     updatedAt: stored?.updatedAt ?? "",
   };
@@ -153,6 +156,7 @@ async function ensureMonthExists(
       ExpressionAttributeValues: {
         ":seed": {
           ptoDays: 0,
+          sickDays: 0,
           inOfficeDates: [],
           updatedAt: new Date().toISOString(),
         },
@@ -161,35 +165,52 @@ async function ensureMonthExists(
   );
 }
 
-export async function setPtoDays(
+async function setMonthDayCount(
   email: string,
   monthKey: string,
-  ptoDays: number,
+  field: "ptoDays" | "sickDays",
+  value: number,
 ): Promise<MonthRecord> {
   await ensureMonthExists(email, monthKey);
   const normalizedEmail = email.toLowerCase();
-  const safe = Math.max(0, Math.floor(ptoDays));
+  const safe = Math.max(0, Math.floor(value));
   await ddb.send(
     new UpdateCommand({
       TableName: TABLE_NAME,
       Key: userKey(normalizedEmail),
       UpdateExpression:
-        "SET #months.#mk.#pto = :pto, #months.#mk.#updatedAt = :now",
+        "SET #months.#mk.#field = :val, #months.#mk.#updatedAt = :now",
       ExpressionAttributeNames: {
         "#months": "months",
         "#mk": monthKey,
-        "#pto": "ptoDays",
+        "#field": field,
         "#updatedAt": "updatedAt",
       },
       ExpressionAttributeValues: {
-        ":pto": safe,
+        ":val": safe,
         ":now": new Date().toISOString(),
       },
     }),
   );
   const record = await getMonthRecord(normalizedEmail, monthKey);
-  if (!record) throw new Error("Month record missing after PTO update");
+  if (!record) throw new Error(`Month record missing after ${field} update`);
   return record;
+}
+
+export function setPtoDays(
+  email: string,
+  monthKey: string,
+  ptoDays: number,
+): Promise<MonthRecord> {
+  return setMonthDayCount(email, monthKey, "ptoDays", ptoDays);
+}
+
+export function setSickDays(
+  email: string,
+  monthKey: string,
+  sickDays: number,
+): Promise<MonthRecord> {
+  return setMonthDayCount(email, monthKey, "sickDays", sickDays);
 }
 
 export async function setInOfficeDates(

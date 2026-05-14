@@ -53,6 +53,9 @@ export function TrackerApp({
   const [ptoInput, setPtoInput] = useState<string>(
     String(initialRecord.ptoDays ?? 0),
   );
+  const [sickInput, setSickInput] = useState<string>(
+    String(initialRecord.sickDays ?? 0),
+  );
   const [isPending, startTransition] = useTransition();
 
   const { year, month } = useMemo(() => parseMonthKey(monthKey), [monthKey]);
@@ -70,6 +73,7 @@ export function TrackerApp({
       setRecord(data.record);
       setStats(data.stats);
       setPtoInput(String(data.record.ptoDays ?? 0));
+      setSickInput(String(data.record.sickDays ?? 0));
       setMonthKey(nextKey);
     },
     [],
@@ -102,7 +106,11 @@ export function TrackerApp({
   );
 
   const persistMonth = useCallback(
-    async (body: { ptoDays?: number; inOfficeDates?: string[] }) => {
+    async (body: {
+      ptoDays?: number;
+      sickDays?: number;
+      inOfficeDates?: string[];
+    }) => {
       const res = await fetch(`/api/months/${monthKey}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -118,6 +126,7 @@ export function TrackerApp({
       setRecord(data.record);
       setStats(data.stats);
       setPtoInput(String(data.record.ptoDays ?? 0));
+      setSickInput(String(data.record.sickDays ?? 0));
     },
     [monthKey],
   );
@@ -138,10 +147,20 @@ export function TrackerApp({
   const commitPto = useCallback(() => {
     const parsed = Number.parseInt(ptoInput, 10);
     const safe = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+    if (safe === record.ptoDays) return;
     startTransition(() => {
       void persistMonth({ ptoDays: safe });
     });
-  }, [ptoInput, persistMonth]);
+  }, [ptoInput, record.ptoDays, persistMonth]);
+
+  const commitSick = useCallback(() => {
+    const parsed = Number.parseInt(sickInput, 10);
+    const safe = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+    if (safe === record.sickDays) return;
+    startTransition(() => {
+      void persistMonth({ sickDays: safe });
+    });
+  }, [sickInput, record.sickDays, persistMonth]);
 
   async function signOut() {
     await fetch("/api/session", { method: "DELETE" });
@@ -267,7 +286,7 @@ export function TrackerApp({
             <div className="flex items-center justify-between mb-3">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  PTO this month
+                  Days off this month
                 </div>
                 <div className="text-sm text-slate-300 mt-1">
                   Taken or planned
@@ -275,30 +294,55 @@ export function TrackerApp({
               </div>
               <CalendarDays className="h-5 w-5 text-slate-400" />
             </div>
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                min={0}
-                step={1}
-                value={ptoInput}
-                onChange={(e) => setPtoInput(e.target.value)}
-                onBlur={commitPto}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    commitPto();
-                  }
-                }}
-                className="max-w-[120px] bg-slate-950/60 ring-1 ring-white/10 border-0 text-lg font-semibold tabular-nums text-white h-11 focus-visible:ring-indigo-400/60 focus-visible:ring-2"
-              />
-              <Button
-                variant="outline"
-                onClick={commitPto}
-                disabled={isPending}
-                className="h-11 bg-white/5 border-0 ring-1 ring-white/15 text-white hover:bg-white/10"
-              >
-                Save
-              </Button>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="pto-input"
+                  className="text-xs font-medium uppercase tracking-wider text-slate-400"
+                >
+                  PTO
+                </label>
+                <Input
+                  id="pto-input"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={ptoInput}
+                  onChange={(e) => setPtoInput(e.target.value)}
+                  onBlur={commitPto}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitPto();
+                    }
+                  }}
+                  className="bg-slate-950/60 ring-1 ring-white/10 border-0 text-lg font-semibold tabular-nums text-white h-11 focus-visible:ring-indigo-400/60 focus-visible:ring-2"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="sick-input"
+                  className="text-xs font-medium uppercase tracking-wider text-slate-400"
+                >
+                  Sick
+                </label>
+                <Input
+                  id="sick-input"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={sickInput}
+                  onChange={(e) => setSickInput(e.target.value)}
+                  onBlur={commitSick}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitSick();
+                    }
+                  }}
+                  className="bg-slate-950/60 ring-1 ring-white/10 border-0 text-lg font-semibold tabular-nums text-white h-11 focus-visible:ring-indigo-400/60 focus-visible:ring-2"
+                />
+              </div>
             </div>
           </div>
 
