@@ -138,10 +138,11 @@ export type MonthStats = {
   remainingToTarget: number;
   percentageAchieved: number;
   onTrack: boolean;
-  // Days the user could still physically be in the office this month:
-  // weekdays from today (inclusive) through month-end, minus future
-  // holidays, minus all PTO and sick days (conservative — assumes none
-  // have been "used" in the past).
+  // Max remaining capacity: weekdays from today (inclusive) through
+  // month-end, minus future holidays. PTO/sick are intentionally NOT
+  // subtracted here — they already reduce the target via workableDays, and
+  // subtracting them again would penalize a user who adds PTO (their %
+  // achieved goes up but their buffer would falsely shrink).
   workingDaysLeft: number;
 };
 
@@ -192,13 +193,9 @@ export function computeMonthStats(args: {
     today.getMonth(),
     today.getDate(),
   );
-  const weekdaysRemaining = weekdays.filter(
+  const workingDaysLeft = weekdays.filter(
     (d) => d >= startOfToday && !holidaySet.has(toISODate(d)),
   ).length;
-  const workingDaysLeft = Math.max(
-    0,
-    weekdaysRemaining - cappedPto - cappedSick,
-  );
 
   return {
     year,
