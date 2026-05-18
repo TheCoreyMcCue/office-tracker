@@ -58,9 +58,9 @@ const RING_DROP_SHADOW: Record<Status, string> = {
 export function SummaryCard({ stats }: { stats: MonthStats }) {
   const ratio =
     stats.targetDays > 0 ? stats.inOfficeCount / stats.targetDays : 0;
-  const displayPct = Math.round(stats.percentageAchieved * 100);
-  const targetPct = Math.round(OFFICE_TARGET_RATIO * 100);
   const ringPct = Math.min(1, ratio);
+  const displayPct = Math.round(ringPct * 100);
+  const targetPct = Math.round(OFFICE_TARGET_RATIO * 100);
   const status = deriveStatus(stats);
   const styles = STATUS_STYLES[status];
   const badgeLabel =
