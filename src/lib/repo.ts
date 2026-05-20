@@ -2,26 +2,23 @@ import { GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, PK_ATTR, TABLE_NAME, userKey } from "./db";
 import type { CountryCode } from "./calendar";
 
+export type DayMark = "office" | "pto" | "sick";
+
 export type UserProfile = {
   email: string;
   country: CountryCode;
   createdAt: string;
 };
 
-export type MonthRecord = {
-  email: string;
-  monthKey: string;
-  ptoDays: number;
-  sickDays: number;
+export type UserData = {
+  profile: UserProfile;
   inOfficeDates: string[];
-  updatedAt: string;
+  ptoDates: string[];
+  sickDates: string[];
 };
 
 type StoredMonth = {
-  ptoDays?: number;
-  sickDays?: number;
   inOfficeDates?: string[];
-  updatedAt?: string;
 };
 
 type StoredUserItem = {
@@ -29,6 +26,13 @@ type StoredUserItem = {
   email?: string;
   country?: CountryCode;
   createdAt?: string;
+  // New global arrays.
+  inOfficeDates?: string[];
+  ptoDates?: string[];
+  sickDates?: string[];
+  // Legacy per-month structure. inOfficeDates inside are flattened on read
+  // into the top-level inOfficeDates array. PTO/sick counts here are NOT
+  // migrated (we have no date info to recover from a count) and are ignored.
   months?: Record<string, StoredMonth>;
 };
 
@@ -48,18 +52,32 @@ function toProfile(item: StoredUserItem): UserProfile | null {
   };
 }
 
-function toMonthRecord(
-  email: string,
-  monthKey: string,
-  stored: StoredMonth | undefined,
-): MonthRecord {
+function dedupeAndSort(dates: string[] | undefined): string[] {
+  return Array.from(new Set(dates ?? [])).sort();
+}
+
+function flattenLegacyInOfficeDates(item: StoredUserItem): string[] {
+  if (!item.months) return [];
+  const out: string[] = [];
+  for (const month of Object.values(item.months)) {
+    if (month?.inOfficeDates) out.push(...month.inOfficeDates);
+  }
+  return out;
+}
+
+function toUserData(item: StoredUserItem): UserData | null {
+  const profile = toProfile(item);
+  if (!profile) return null;
+  // Prefer top-level fields when present, fall back to legacy months map.
+  const inOffice = dedupeAndSort([
+    ...(item.inOfficeDates ?? []),
+    ...flattenLegacyInOfficeDates(item),
+  ]);
   return {
-    email,
-    monthKey,
-    ptoDays: stored?.ptoDays ?? 0,
-    sickDays: stored?.sickDays ?? 0,
-    inOfficeDates: (stored?.inOfficeDates ?? []).slice().sort(),
-    updatedAt: stored?.updatedAt ?? "",
+    profile,
+    inOfficeDates: inOffice,
+    ptoDates: dedupeAndSort(item.ptoDates),
+    sickDates: dedupeAndSort(item.sickDates),
   };
 }
 
@@ -69,6 +87,12 @@ export async function getUserProfile(
   const item = await getUserItem(email);
   if (!item) return null;
   return toProfile(item);
+}
+
+export async function getUserData(email: string): Promise<UserData | null> {
+  const item = await getUserItem(email);
+  if (!item) return null;
+  return toUserData(item);
 }
 
 export async function upsertUserProfile(
@@ -82,18 +106,20 @@ export async function upsertUserProfile(
       TableName: TABLE_NAME,
       Key: userKey(normalizedEmail),
       UpdateExpression:
-        "SET #email = :email, #country = :country, #createdAt = if_not_exists(#createdAt, :now), #months = if_not_exists(#months, :empty)",
+        "SET #email = :email, #country = :country, #createdAt = if_not_exists(#createdAt, :now), #inOffice = if_not_exists(#inOffice, :empty), #pto = if_not_exists(#pto, :empty), #sick = if_not_exists(#sick, :empty)",
       ExpressionAttributeNames: {
         "#email": "email",
         "#country": "country",
         "#createdAt": "createdAt",
-        "#months": "months",
+        "#inOffice": "inOfficeDates",
+        "#pto": "ptoDates",
+        "#sick": "sickDates",
       },
       ExpressionAttributeValues: {
         ":email": normalizedEmail,
         ":country": country,
         ":now": now,
-        ":empty": {},
+        ":empty": [],
       },
     }),
   );
@@ -104,151 +130,60 @@ export async function upsertUserProfile(
   return profile;
 }
 
-export async function getMonthRecord(
-  email: string,
-  monthKey: string,
-): Promise<MonthRecord | null> {
-  const item = await getUserItem(email);
-  if (!item) return null;
-  const stored = item.months?.[monthKey];
-  if (!stored) return null;
-  return toMonthRecord(email.toLowerCase(), monthKey, stored);
-}
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-async function ensureUserItemExists(email: string): Promise<void> {
+export async function setDayMark(
+  email: string,
+  date: string,
+  mark: DayMark | null,
+): Promise<UserData> {
+  if (!ISO_DATE_RE.test(date)) {
+    throw new Error(`Invalid date: ${date}`);
+  }
   const normalizedEmail = email.toLowerCase();
+  const data = await getUserData(normalizedEmail);
+  if (!data) throw new Error("User not found");
+
+  // Remove this date from all three arrays, then add it to the target (if any).
+  const next: Record<DayMark, string[]> = {
+    office: data.inOfficeDates.filter((d) => d !== date),
+    pto: data.ptoDates.filter((d) => d !== date),
+    sick: data.sickDates.filter((d) => d !== date),
+  };
+  if (mark) {
+    next[mark] = dedupeAndSort([...next[mark], date]);
+  }
+
   await ddb.send(
     new UpdateCommand({
       TableName: TABLE_NAME,
       Key: userKey(normalizedEmail),
       UpdateExpression:
-        "SET #email = if_not_exists(#email, :email), #createdAt = if_not_exists(#createdAt, :now), #months = if_not_exists(#months, :empty)",
+        "SET #inOffice = :inOffice, #pto = :pto, #sick = :sick",
       ExpressionAttributeNames: {
-        "#email": "email",
-        "#createdAt": "createdAt",
-        "#months": "months",
+        "#inOffice": "inOfficeDates",
+        "#pto": "ptoDates",
+        "#sick": "sickDates",
       },
       ExpressionAttributeValues: {
-        ":email": normalizedEmail,
-        ":now": new Date().toISOString(),
-        ":empty": {},
+        ":inOffice": next.office,
+        ":pto": next.pto,
+        ":sick": next.sick,
       },
     }),
   );
+
+  return {
+    profile: data.profile,
+    inOfficeDates: next.office,
+    ptoDates: next.pto,
+    sickDates: next.sick,
+  };
 }
 
-async function ensureMonthExists(
-  email: string,
-  monthKey: string,
-): Promise<void> {
-  await ensureUserItemExists(email);
-  const normalizedEmail = email.toLowerCase();
-  await ddb.send(
-    new UpdateCommand({
-      TableName: TABLE_NAME,
-      Key: userKey(normalizedEmail),
-      UpdateExpression:
-        "SET #months.#mk = if_not_exists(#months.#mk, :seed)",
-      ExpressionAttributeNames: {
-        "#months": "months",
-        "#mk": monthKey,
-      },
-      ExpressionAttributeValues: {
-        ":seed": {
-          ptoDays: 0,
-          sickDays: 0,
-          inOfficeDates: [],
-          updatedAt: new Date().toISOString(),
-        },
-      },
-    }),
-  );
-}
-
-async function setMonthDayCount(
-  email: string,
-  monthKey: string,
-  field: "ptoDays" | "sickDays",
-  value: number,
-): Promise<MonthRecord> {
-  await ensureMonthExists(email, monthKey);
-  const normalizedEmail = email.toLowerCase();
-  const safe = Math.max(0, Math.floor(value));
-  await ddb.send(
-    new UpdateCommand({
-      TableName: TABLE_NAME,
-      Key: userKey(normalizedEmail),
-      UpdateExpression:
-        "SET #months.#mk.#field = :val, #months.#mk.#updatedAt = :now",
-      ExpressionAttributeNames: {
-        "#months": "months",
-        "#mk": monthKey,
-        "#field": field,
-        "#updatedAt": "updatedAt",
-      },
-      ExpressionAttributeValues: {
-        ":val": safe,
-        ":now": new Date().toISOString(),
-      },
-    }),
-  );
-  const record = await getMonthRecord(normalizedEmail, monthKey);
-  if (!record) throw new Error(`Month record missing after ${field} update`);
-  return record;
-}
-
-export function setPtoDays(
-  email: string,
-  monthKey: string,
-  ptoDays: number,
-): Promise<MonthRecord> {
-  return setMonthDayCount(email, monthKey, "ptoDays", ptoDays);
-}
-
-export function setSickDays(
-  email: string,
-  monthKey: string,
-  sickDays: number,
-): Promise<MonthRecord> {
-  return setMonthDayCount(email, monthKey, "sickDays", sickDays);
-}
-
-export async function setInOfficeDates(
-  email: string,
-  monthKey: string,
-  inOfficeDates: string[],
-): Promise<MonthRecord> {
-  await ensureMonthExists(email, monthKey);
-  const normalizedEmail = email.toLowerCase();
-  const unique = Array.from(new Set(inOfficeDates)).sort();
-  await ddb.send(
-    new UpdateCommand({
-      TableName: TABLE_NAME,
-      Key: userKey(normalizedEmail),
-      UpdateExpression:
-        "SET #months.#mk.#dates = :dates, #months.#mk.#updatedAt = :now",
-      ExpressionAttributeNames: {
-        "#months": "months",
-        "#mk": monthKey,
-        "#dates": "inOfficeDates",
-        "#updatedAt": "updatedAt",
-      },
-      ExpressionAttributeValues: {
-        ":dates": unique,
-        ":now": new Date().toISOString(),
-      },
-    }),
-  );
-  const record = await getMonthRecord(normalizedEmail, monthKey);
-  if (!record) throw new Error("Month record missing after dates update");
-  return record;
-}
-
-export async function listMonthsForUser(email: string): Promise<MonthRecord[]> {
-  const item = await getUserItem(email);
-  if (!item?.months) return [];
-  const normalizedEmail = email.toLowerCase();
-  return Object.entries(item.months)
-    .map(([mk, stored]) => toMonthRecord(normalizedEmail, mk, stored))
-    .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+export function findMarkForDate(data: UserData, date: string): DayMark | null {
+  if (data.inOfficeDates.includes(date)) return "office";
+  if (data.ptoDates.includes(date)) return "pto";
+  if (data.sickDates.includes(date)) return "sick";
+  return null;
 }

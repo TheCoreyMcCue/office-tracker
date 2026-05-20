@@ -1,4 +1,6 @@
 import Holidays from "date-holidays";
+import type { ReportingPeriod } from "./reporting-periods";
+import { getWeekdaysInPeriod } from "./reporting-periods";
 
 export type CountryCode = "IE" | "NL";
 
@@ -32,26 +34,6 @@ export function toISODate(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-export function getWeekdaysInMonth(year: number, month: number): Date[] {
-  const days: Date[] = [];
-  const date = new Date(year, month, 1);
-  while (date.getMonth() === month) {
-    if (!isWeekend(date)) days.push(new Date(date));
-    date.setDate(date.getDate() + 1);
-  }
-  return days;
-}
-
-export function getAllDaysInMonth(year: number, month: number): Date[] {
-  const days: Date[] = [];
-  const date = new Date(year, month, 1);
-  while (date.getMonth() === month) {
-    days.push(new Date(date));
-    date.setDate(date.getDate() + 1);
-  }
-  return days;
-}
-
 export type HolidayInfo = { date: string; name: string };
 
 // Holidays we treat as public even though date-holidays returns them with a
@@ -61,15 +43,10 @@ export type HolidayInfo = { date: string; name: string };
 //   NL — https://www.government.nl/topics/public-holidays
 //   IE — https://www.fssu.ie/post-primary/topics/payroll/public-holidays/
 type AdditionalHoliday = {
-  // Lowercased name to match against date-holidays' output.
   name: string;
-  // Why we override date-holidays' classification.
   note: string;
 };
 const ADDITIONAL_PUBLIC_HOLIDAYS: Record<CountryCode, AdditionalHoliday[]> = {
-  // Ireland's statutory public holidays are all returned as type="public" by
-  // date-holidays, so nothing to add here. Weekend-fall substitutes are
-  // handled separately — see the isSubstitute check below.
   IE: [],
   NL: [
     {
@@ -83,50 +60,53 @@ const ADDITIONAL_PUBLIC_HOLIDAYS: Record<CountryCode, AdditionalHoliday[]> = {
   ],
 };
 
-export function getPublicHolidaysInMonth(
+// Holidays in [startIso, endIso] inclusive, weekdays only, deduped.
+export function getPublicHolidaysInRange(
   country: CountryCode,
-  year: number,
-  month: number,
+  startIso: string,
+  endIso: string,
 ): HolidayInfo[] {
   const hd = getHolidays(country);
-  const all = hd.getHolidays(year) ?? [];
+  const startYear = Number(startIso.slice(0, 4));
+  const endYear = Number(endIso.slice(0, 4));
+  const years = new Set<number>();
+  for (let y = startYear; y <= endYear; y++) years.add(y);
+
   const result: HolidayInfo[] = [];
   const seen = new Set<string>();
 
   const push = (date: string, name: string) => {
     const d = new Date(date);
-    if (d.getFullYear() !== year || d.getMonth() !== month) return;
+    if (Number.isNaN(d.getTime())) return;
     if (isWeekend(d)) return;
     const iso = toISODate(d);
+    if (iso < startIso || iso > endIso) return;
     if (seen.has(iso)) return;
     seen.add(iso);
     result.push({ date: iso, name });
   };
 
   const additional = ADDITIONAL_PUBLIC_HOLIDAYS[country];
-  for (const h of all) {
-    const lowerName = h.name.toLowerCase();
-    const isPublic = h.type === "public";
-    const isAdditional = additional.some((a) => lowerName === a.name);
-    // Substitute days: when an IE public holiday lands on Sat/Sun, the
-    // statute (per FSSU) does NOT grant an automatic next-working-day off —
-    // employers compensate via TOIL, extra pay, or an alternative day at
-    // their discretion. In practice most Irish employers give the next
-    // Monday, so we include date-holidays' "(substitute day)" entries.
-    // This branch is a no-op in years where no IE public holiday falls on
-    // a weekend (e.g. 2025: none; 2026: Dec 26 Sat → Dec 28 Mon; 2027: Dec
-    // 25 Sat → Dec 27 Mon).
-    const isSubstitute = lowerName.includes("substitute");
-    if (!isPublic && !isAdditional && !isSubstitute) continue;
-    push(h.date, h.name);
+  for (const year of years) {
+    const all = hd.getHolidays(year) ?? [];
+    for (const h of all) {
+      const lowerName = h.name.toLowerCase();
+      const isPublic = h.type === "public";
+      const isAdditional = additional.some((a) => lowerName === a.name);
+      // Substitute days: see FSSU note in earlier commit. Includes
+      // date-holidays' "(substitute day)" entries since most IE employers
+      // observe them in practice.
+      const isSubstitute = lowerName.includes("substitute");
+      if (!isPublic && !isAdditional && !isSubstitute) continue;
+      push(h.date, h.name);
+    }
   }
 
   return result.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-export type MonthStats = {
-  year: number;
-  month: number;
+export type PeriodStats = {
+  period: ReportingPeriod;
   country: CountryCode;
   totalWeekdays: number;
   holidays: HolidayInfo[];
@@ -138,51 +118,54 @@ export type MonthStats = {
   remainingToTarget: number;
   percentageAchieved: number;
   onTrack: boolean;
-  // Max remaining capacity: weekdays from today (inclusive) through
-  // month-end, minus future holidays. PTO/sick are intentionally NOT
-  // subtracted here — they already reduce the target via workableDays, and
-  // subtracting them again would penalize a user who adds PTO (their %
-  // achieved goes up but their buffer would falsely shrink).
+  // Max remaining capacity: weekdays in this period from today (inclusive)
+  // onward, minus future holidays. PTO/sick are intentionally NOT subtracted
+  // here — they already reduce the target via workableDays, and subtracting
+  // again would falsely shrink the buffer.
   workingDaysLeft: number;
 };
 
-export function computeMonthStats(args: {
-  year: number;
-  month: number;
+export function computePeriodStats(args: {
+  period: ReportingPeriod;
   country: CountryCode;
-  ptoDays: number;
-  sickDays: number;
   inOfficeDates: string[];
-}): MonthStats {
-  const { year, month, country, ptoDays, sickDays, inOfficeDates } = args;
-  const weekdays = getWeekdaysInMonth(year, month);
-  const holidays = getPublicHolidaysInMonth(country, year, month);
+  ptoDates: string[];
+  sickDates: string[];
+}): PeriodStats {
+  const { period, country, inOfficeDates, ptoDates, sickDates } = args;
+  const weekdays = getWeekdaysInPeriod(period);
+  const holidays = getPublicHolidaysInRange(country, period.start, period.end);
   const totalWeekdays = weekdays.length;
 
   const holidaySet = new Set(holidays.map((h) => h.date));
-  const availableForOff = Math.max(0, totalWeekdays - holidays.length);
-  const cappedPto = Math.max(0, Math.min(ptoDays, availableForOff));
-  const cappedSick = Math.max(0, Math.min(sickDays, availableForOff));
+  const inRange = (iso: string) => iso >= period.start && iso <= period.end;
+
+  const ptoInPeriod = new Set(
+    ptoDates.filter((d) => inRange(d) && !holidaySet.has(d)),
+  );
+  const sickInPeriod = new Set(
+    sickDates.filter(
+      (d) => inRange(d) && !holidaySet.has(d) && !ptoInPeriod.has(d),
+    ),
+  );
+  const officeInPeriod = new Set(
+    inOfficeDates.filter(
+      (d) =>
+        inRange(d) &&
+        !holidaySet.has(d) &&
+        !ptoInPeriod.has(d) &&
+        !sickInPeriod.has(d),
+    ),
+  );
 
   const workableDays = Math.max(
     0,
-    totalWeekdays - holidays.length - cappedPto - cappedSick,
+    totalWeekdays - holidays.length - ptoInPeriod.size - sickInPeriod.size,
   );
   const targetDays =
     workableDays > 0 ? Math.ceil(workableDays * OFFICE_TARGET_RATIO) : 0;
 
-  const validInOffice = inOfficeDates.filter((iso) => {
-    const d = new Date(iso);
-    return (
-      !Number.isNaN(d.getTime()) &&
-      d.getFullYear() === year &&
-      d.getMonth() === month &&
-      !isWeekend(d) &&
-      !holidaySet.has(iso)
-    );
-  });
-  const inOfficeCount = new Set(validInOffice).size;
-
+  const inOfficeCount = officeInPeriod.size;
   const remainingToTarget = Math.max(0, targetDays - inOfficeCount);
   const percentageAchieved =
     workableDays > 0 ? inOfficeCount / workableDays : 0;
@@ -198,13 +181,12 @@ export function computeMonthStats(args: {
   ).length;
 
   return {
-    year,
-    month,
+    period,
     country,
     totalWeekdays,
     holidays,
-    ptoDays: cappedPto,
-    sickDays: cappedSick,
+    ptoDays: ptoInPeriod.size,
+    sickDays: sickInPeriod.size,
     workableDays,
     targetDays,
     inOfficeCount,
@@ -213,20 +195,4 @@ export function computeMonthStats(args: {
     onTrack: inOfficeCount >= targetDays,
     workingDaysLeft,
   };
-}
-
-export function monthKey(year: number, month: number): string {
-  return `${year}-${String(month + 1).padStart(2, "0")}`;
-}
-
-export function parseMonthKey(key: string): { year: number; month: number } {
-  const [y, m] = key.split("-").map(Number);
-  return { year: y, month: m - 1 };
-}
-
-export function formatMonthLabel(year: number, month: number): string {
-  return new Date(year, month, 1).toLocaleString("en-US", {
-    month: "long",
-    year: "numeric",
-  });
 }

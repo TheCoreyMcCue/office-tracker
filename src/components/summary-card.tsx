@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { OFFICE_TARGET_RATIO, type MonthStats } from "@/lib/calendar";
+import { OFFICE_TARGET_RATIO, type PeriodStats } from "@/lib/calendar";
 
 // Yellow ("tight") if the buffer of extra working days beyond what's needed
 // is at this number or fewer. 2 days felt right at the default 60% policy —
@@ -10,7 +10,7 @@ const TIGHT_BUFFER_DAYS = 2;
 
 type Status = "achieved" | "good" | "tight" | "behind";
 
-function deriveStatus(stats: MonthStats): Status {
+function deriveStatus(stats: PeriodStats): Status {
   if (stats.onTrack) return "achieved";
   if (stats.remainingToTarget > stats.workingDaysLeft) return "behind";
   if (stats.workingDaysLeft - stats.remainingToTarget <= TIGHT_BUFFER_DAYS)
@@ -55,7 +55,7 @@ const RING_DROP_SHADOW: Record<Status, string> = {
   behind: "drop-shadow(0 0 6px rgba(248,113,113,0.6))",
 };
 
-export function SummaryCard({ stats }: { stats: MonthStats }) {
+export function SummaryCard({ stats }: { stats: PeriodStats }) {
   const ratio =
     stats.targetDays > 0 ? stats.inOfficeCount / stats.targetDays : 0;
   const ringPct = Math.min(1, ratio);
@@ -94,7 +94,7 @@ export function SummaryCard({ stats }: { stats: MonthStats }) {
       <div className="relative flex items-center justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            This month
+            This period
           </div>
           <div className="text-sm text-slate-300 mt-1">
             Target {targetPct}% of workable days

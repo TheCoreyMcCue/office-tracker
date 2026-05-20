@@ -1,14 +1,15 @@
 import { getSessionEmail } from "@/lib/session";
-import { getUserProfile, getMonthRecord } from "@/lib/repo";
-import { computeMonthStats, monthKey } from "@/lib/calendar";
+import { getUserData } from "@/lib/repo";
+import { computePeriodStats } from "@/lib/calendar";
+import { getCurrentPeriod } from "@/lib/reporting-periods";
 import { SignInForm } from "@/components/sign-in-form";
 import { TrackerApp } from "@/components/tracker-app";
 
 export default async function Home() {
   const email = await getSessionEmail();
-  const profile = email ? await getUserProfile(email) : null;
+  const data = email ? await getUserData(email) : null;
 
-  if (!profile) {
+  if (!data) {
     return (
       <main className="relative flex-1 flex items-center justify-center px-6 py-12 bg-slate-950 overflow-hidden">
         <div
@@ -22,16 +23,13 @@ export default async function Home() {
     );
   }
 
-  const now = new Date();
-  const currentKey = monthKey(now.getFullYear(), now.getMonth());
-  const record = await getMonthRecord(profile.email, currentKey);
-  const stats = computeMonthStats({
-    year: now.getFullYear(),
-    month: now.getMonth(),
-    country: profile.country,
-    ptoDays: record?.ptoDays ?? 0,
-    sickDays: record?.sickDays ?? 0,
-    inOfficeDates: record?.inOfficeDates ?? [],
+  const period = getCurrentPeriod();
+  const stats = computePeriodStats({
+    period,
+    country: data.profile.country,
+    inOfficeDates: data.inOfficeDates,
+    ptoDates: data.ptoDates,
+    sickDates: data.sickDates,
   });
 
   return (
@@ -45,21 +43,16 @@ export default async function Home() {
         className="pointer-events-none absolute inset-0 -z-0 bg-[radial-gradient(circle_at_85%_120%,rgba(16,185,129,0.08),transparent_50%)]"
       />
       <div className="relative z-10">
-      <TrackerApp
-        initialProfile={profile}
-        initialMonthKey={currentKey}
-        initialRecord={
-          record ?? {
-            email: profile.email,
-            monthKey: currentKey,
-            ptoDays: 0,
-            sickDays: 0,
-            inOfficeDates: [],
-            updatedAt: "",
-          }
-        }
-        initialStats={stats}
-      />
+        <TrackerApp
+          initialProfile={data.profile}
+          initialPeriod={period}
+          initialDates={{
+            inOfficeDates: data.inOfficeDates,
+            ptoDates: data.ptoDates,
+            sickDates: data.sickDates,
+          }}
+          initialStats={stats}
+        />
       </div>
     </main>
   );

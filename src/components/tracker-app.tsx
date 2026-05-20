@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,10 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import {
   Building2,
-  CalendarDays,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -21,73 +19,104 @@ import {
 } from "lucide-react";
 import {
   SUPPORTED_COUNTRIES,
-  formatMonthLabel,
-  monthKey as buildMonthKey,
-  parseMonthKey,
   type CountryCode,
-  type MonthStats,
+  type PeriodStats,
 } from "@/lib/calendar";
-import type { MonthRecord, UserProfile } from "@/lib/repo";
+import {
+  formatPeriodRange,
+  periodKey,
+  type ReportingPeriod,
+  getAllReportingPeriods,
+} from "@/lib/reporting-periods";
+import type { DayMark, UserProfile } from "@/lib/repo";
 import { cn } from "@/lib/utils";
-import { MonthCalendar } from "./month-calendar";
+import { PeriodCalendar } from "./period-calendar";
 import { SummaryCard } from "./summary-card";
+
+export type UserDates = {
+  inOfficeDates: string[];
+  ptoDates: string[];
+  sickDates: string[];
+};
 
 type Props = {
   initialProfile: UserProfile;
-  initialMonthKey: string;
-  initialRecord: MonthRecord;
-  initialStats: MonthStats;
+  initialPeriod: ReportingPeriod;
+  initialDates: UserDates;
+  initialStats: PeriodStats;
 };
+
+const MODES: {
+  mark: DayMark;
+  label: string;
+  dotClass: string;
+  activeClass: string;
+}[] = [
+  {
+    mark: "office",
+    label: "Office",
+    dotClass: "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]",
+    activeClass:
+      "bg-emerald-500/20 text-white ring-1 ring-emerald-400/50 shadow-[0_0_16px_-4px_rgba(52,211,153,0.55)]",
+  },
+  {
+    mark: "pto",
+    label: "PTO",
+    dotClass: "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.8)]",
+    activeClass:
+      "bg-sky-500/20 text-white ring-1 ring-sky-400/50 shadow-[0_0_16px_-4px_rgba(56,189,248,0.55)]",
+  },
+  {
+    mark: "sick",
+    label: "Sick",
+    dotClass: "bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.8)]",
+    activeClass:
+      "bg-rose-500/20 text-white ring-1 ring-rose-400/50 shadow-[0_0_16px_-4px_rgba(251,113,133,0.55)]",
+  },
+];
 
 export function TrackerApp({
   initialProfile,
-  initialMonthKey,
-  initialRecord,
+  initialPeriod,
+  initialDates,
   initialStats,
 }: Props) {
   const router = useRouter();
   const [profile, setProfile] = useState<UserProfile>(initialProfile);
-  const [monthKey, setMonthKey] = useState(initialMonthKey);
-  const [record, setRecord] = useState<MonthRecord>(initialRecord);
-  const [stats, setStats] = useState<MonthStats>(initialStats);
-  const [ptoInput, setPtoInput] = useState<string>(
-    String(initialRecord.ptoDays ?? 0),
-  );
-  const [sickInput, setSickInput] = useState<string>(
-    String(initialRecord.sickDays ?? 0),
-  );
+  const [period, setPeriod] = useState<ReportingPeriod>(initialPeriod);
+  const [dates, setDates] = useState<UserDates>(initialDates);
+  const [stats, setStats] = useState<PeriodStats>(initialStats);
+  const [mode, setMode] = useState<DayMark>("office");
   const [isPending, startTransition] = useTransition();
 
-  const { year, month } = useMemo(() => parseMonthKey(monthKey), [monthKey]);
+  const allPeriods = getAllReportingPeriods();
+  const periodIndex = allPeriods.findIndex((p) => p.start === period.start);
+  const hasPrev = periodIndex > 0;
+  const hasNext = periodIndex >= 0 && periodIndex < allPeriods.length - 1;
 
-  const loadMonth = useCallback(
-    async (nextKey: string) => {
-      const res = await fetch(`/api/months/${nextKey}`);
-      if (!res.ok) return;
-      const data = (await res.json()) as {
-        profile: UserProfile;
-        record: MonthRecord;
-        stats: MonthStats;
-      };
-      setProfile(data.profile);
-      setRecord(data.record);
-      setStats(data.stats);
-      setPtoInput(String(data.record.ptoDays ?? 0));
-      setSickInput(String(data.record.sickDays ?? 0));
-      setMonthKey(nextKey);
-    },
-    [],
-  );
+  const loadPeriod = useCallback(async (next: ReportingPeriod) => {
+    const res = await fetch(`/api/periods/${periodKey(next)}`);
+    if (!res.ok) return;
+    const data = (await res.json()) as {
+      profile: UserProfile;
+      dates: UserDates;
+      stats: PeriodStats;
+    };
+    setProfile(data.profile);
+    setDates(data.dates);
+    setStats(data.stats);
+    setPeriod(next);
+  }, []);
 
-  const shiftMonth = useCallback(
-    (delta: number) => {
-      const d = new Date(year, month + delta, 1);
-      const nextKey = buildMonthKey(d.getFullYear(), d.getMonth());
+  const shiftPeriod = useCallback(
+    (delta: -1 | 1) => {
+      const target = allPeriods[periodIndex + delta];
+      if (!target) return;
       startTransition(() => {
-        void loadMonth(nextKey);
+        void loadPeriod(target);
       });
     },
-    [year, month, loadMonth],
+    [allPeriods, periodIndex, loadPeriod],
   );
 
   const updateCountry = useCallback(
@@ -98,69 +127,57 @@ export function TrackerApp({
         body: JSON.stringify({ country: next }),
       });
       if (!res.ok) return;
-      const data = (await res.json()) as { profile: UserProfile };
-      setProfile(data.profile);
-      await loadMonth(monthKey);
+      const updated = (await res.json()) as { profile: UserProfile };
+      setProfile(updated.profile);
+      await loadPeriod(period);
     },
-    [monthKey, loadMonth],
+    [period, loadPeriod],
   );
 
-  const persistMonth = useCallback(
-    async (body: {
-      ptoDays?: number;
-      sickDays?: number;
-      inOfficeDates?: string[];
-    }) => {
-      const res = await fetch(`/api/months/${monthKey}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as {
-        profile: UserProfile;
-        record: MonthRecord;
-        stats: MonthStats;
+  const toggleDate = useCallback(
+    (date: string) => {
+      const current: DayMark | null = dates.inOfficeDates.includes(date)
+        ? "office"
+        : dates.ptoDates.includes(date)
+          ? "pto"
+          : dates.sickDates.includes(date)
+            ? "sick"
+            : null;
+      const nextMark: DayMark | null = current === mode ? null : mode;
+
+      // Optimistic update.
+      const filter = (arr: string[]) => arr.filter((d) => d !== date);
+      const nextDates: UserDates = {
+        inOfficeDates: filter(dates.inOfficeDates),
+        ptoDates: filter(dates.ptoDates),
+        sickDates: filter(dates.sickDates),
       };
-      setProfile(data.profile);
-      setRecord(data.record);
-      setStats(data.stats);
-      setPtoInput(String(data.record.ptoDays ?? 0));
-      setSickInput(String(data.record.sickDays ?? 0));
-    },
-    [monthKey],
-  );
+      if (nextMark === "office")
+        nextDates.inOfficeDates = [...nextDates.inOfficeDates, date].sort();
+      else if (nextMark === "pto")
+        nextDates.ptoDates = [...nextDates.ptoDates, date].sort();
+      else if (nextMark === "sick")
+        nextDates.sickDates = [...nextDates.sickDates, date].sort();
+      setDates(nextDates);
 
-  const toggleInOffice = useCallback(
-    (iso: string) => {
-      const current = new Set(record.inOfficeDates);
-      if (current.has(iso)) current.delete(iso);
-      else current.add(iso);
-      const next = Array.from(current).sort();
-      startTransition(() => {
-        void persistMonth({ inOfficeDates: next });
+      startTransition(async () => {
+        const res = await fetch("/api/marks", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ date, mark: nextMark }),
+        });
+        if (!res.ok) return;
+        const body = (await res.json()) as { dates: UserDates };
+        setDates(body.dates);
+        // Refresh stats from the server for the current period.
+        const statsRes = await fetch(`/api/periods/${periodKey(period)}`);
+        if (!statsRes.ok) return;
+        const refreshed = (await statsRes.json()) as { stats: PeriodStats };
+        setStats(refreshed.stats);
       });
     },
-    [record.inOfficeDates, persistMonth],
+    [dates, mode, period],
   );
-
-  const commitPto = useCallback(() => {
-    const parsed = Number.parseInt(ptoInput, 10);
-    const safe = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
-    if (safe === record.ptoDays) return;
-    startTransition(() => {
-      void persistMonth({ ptoDays: safe });
-    });
-  }, [ptoInput, record.ptoDays, persistMonth]);
-
-  const commitSick = useCallback(() => {
-    const parsed = Number.parseInt(sickInput, 10);
-    const safe = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
-    if (safe === record.sickDays) return;
-    startTransition(() => {
-      void persistMonth({ sickDays: safe });
-    });
-  }, [sickInput, record.sickDays, persistMonth]);
 
   async function signOut() {
     await fetch("/api/session", { method: "DELETE" });
@@ -224,23 +241,28 @@ export function TrackerApp({
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => shiftMonth(-1)}
-            aria-label="Previous month"
-            disabled={isPending}
-            className="rounded-full h-8 w-8 text-slate-300 hover:text-white hover:bg-white/10"
+            onClick={() => shiftPeriod(-1)}
+            aria-label="Previous period"
+            disabled={isPending || !hasPrev}
+            className="rounded-full h-8 w-8 text-slate-300 hover:text-white hover:bg-white/10 disabled:opacity-30"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <div className="text-base font-semibold text-white min-w-[150px] text-center tabular-nums tracking-tight">
-            {formatMonthLabel(year, month)}
+          <div className="px-2 text-center min-w-[180px]">
+            <div className="text-base font-semibold text-white tabular-nums tracking-tight leading-tight">
+              {period.label}
+            </div>
+            <div className="text-xs text-slate-400 tabular-nums">
+              {formatPeriodRange(period)}
+            </div>
           </div>
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => shiftMonth(1)}
-            aria-label="Next month"
-            disabled={isPending}
-            className="rounded-full h-8 w-8 text-slate-300 hover:text-white hover:bg-white/10"
+            onClick={() => shiftPeriod(1)}
+            aria-label="Next period"
+            disabled={isPending || !hasNext}
+            className="rounded-full h-8 w-8 text-slate-300 hover:text-white hover:bg-white/10 disabled:opacity-30"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -254,97 +276,65 @@ export function TrackerApp({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
-        <div className={cn(panelClass, "flex flex-col")}>
+        <div
+          className={cn(
+            panelClass,
+            "flex flex-col lg:min-h-[calc(100dvh-220px)]",
+          )}
+        >
           <div
             aria-hidden
             className="pointer-events-none absolute inset-x-6 -top-px h-px bg-gradient-to-r from-transparent via-white/20 to-transparent"
           />
-          <div className="mb-3">
+          <div className="mb-4">
             <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Calendar
             </div>
             <h2 className="text-lg font-semibold text-white mt-1">
-              Mark in-office days
+              Mark your days
             </h2>
-            <p className="text-sm text-slate-300">
-              Click any weekday to toggle. Weekends and holidays are excluded.
+            <p className="text-sm text-slate-300 mb-3">
+              Pick what you&apos;re marking below, then click a day. Click
+              again to clear.
             </p>
+            <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-950/40 p-2 ring-1 ring-white/10">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 pl-2">
+                Marking as
+              </span>
+              <div className="inline-flex items-center gap-1 flex-1 min-w-0">
+                {MODES.map((m) => (
+                  <button
+                    key={m.mark}
+                    type="button"
+                    onClick={() => setMode(m.mark)}
+                    aria-pressed={mode === m.mark}
+                    className={cn(
+                      "inline-flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all",
+                      mode === m.mark
+                        ? m.activeClass
+                        : "text-slate-300 hover:text-white hover:bg-white/5 ring-1 ring-transparent",
+                    )}
+                  >
+                    <span
+                      className={cn("h-2 w-2 rounded-full", m.dotClass)}
+                    />
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-          <MonthCalendar
-            year={year}
-            month={month}
+          <PeriodCalendar
+            period={period}
             stats={stats}
-            inOfficeDates={new Set(record.inOfficeDates)}
-            onToggle={toggleInOffice}
+            dates={dates}
+            mode={mode}
+            onToggle={toggleDate}
           />
         </div>
 
         <div className="space-y-4">
           <SummaryCard stats={stats} />
-
-          <div className={panelClass}>
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Days off this month
-                </div>
-                <div className="text-sm text-slate-300 mt-1">
-                  Taken or planned
-                </div>
-              </div>
-              <CalendarDays className="h-5 w-5 text-slate-400" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="pto-input"
-                  className="text-xs font-medium uppercase tracking-wider text-slate-400"
-                >
-                  PTO
-                </label>
-                <Input
-                  id="pto-input"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={ptoInput}
-                  onChange={(e) => setPtoInput(e.target.value)}
-                  onBlur={commitPto}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitPto();
-                    }
-                  }}
-                  className="bg-slate-950/60 ring-1 ring-white/10 border-0 text-lg font-semibold tabular-nums text-white h-11 focus-visible:ring-indigo-400/60 focus-visible:ring-2"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="sick-input"
-                  className="text-xs font-medium uppercase tracking-wider text-slate-400"
-                >
-                  Sick
-                </label>
-                <Input
-                  id="sick-input"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={sickInput}
-                  onChange={(e) => setSickInput(e.target.value)}
-                  onBlur={commitSick}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitSick();
-                    }
-                  }}
-                  className="bg-slate-950/60 ring-1 ring-white/10 border-0 text-lg font-semibold tabular-nums text-white h-11 focus-visible:ring-indigo-400/60 focus-visible:ring-2"
-                />
-              </div>
-            </div>
-          </div>
 
           {stats.holidays.length > 0 && (
             <div className={panelClass}>
