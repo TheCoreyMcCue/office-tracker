@@ -8,6 +8,7 @@ export type UserProfile = {
   email: string;
   country: CountryCode;
   createdAt: string;
+  officeIp?: string;
 };
 
 export type UserData = {
@@ -26,6 +27,7 @@ type StoredUserItem = {
   email?: string;
   country?: CountryCode;
   createdAt?: string;
+  officeIp?: string;
   // New global arrays.
   inOfficeDates?: string[];
   ptoDates?: string[];
@@ -49,6 +51,7 @@ function toProfile(item: StoredUserItem): UserProfile | null {
     email: item.email,
     country: item.country,
     createdAt: item.createdAt ?? new Date(0).toISOString(),
+    officeIp: item.officeIp,
   };
 }
 
@@ -179,6 +182,27 @@ export async function setDayMark(
     ptoDates: next.pto,
     sickDates: next.sick,
   };
+}
+
+export async function setOfficeIp(
+  email: string,
+  ip: string,
+): Promise<UserProfile> {
+  const normalizedEmail = email.toLowerCase();
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: userKey(normalizedEmail),
+      UpdateExpression: "SET #officeIp = :officeIp",
+      ExpressionAttributeNames: { "#officeIp": "officeIp" },
+      ExpressionAttributeValues: { ":officeIp": ip },
+    }),
+  );
+  const item = await getUserItem(normalizedEmail);
+  if (!item) throw new Error("User item missing after update");
+  const profile = toProfile(item);
+  if (!profile) throw new Error("User item malformed after update");
+  return profile;
 }
 
 export function findMarkForDate(data: UserData, date: string): DayMark | null {

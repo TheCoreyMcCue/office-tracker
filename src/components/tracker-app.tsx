@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,7 +15,9 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
+  MapPin,
   Sparkles,
+  Wifi,
 } from "lucide-react";
 import {
   SUPPORTED_COUNTRIES,
@@ -38,6 +40,8 @@ export type UserDates = {
   ptoDates: string[];
   sickDates: string[];
 };
+
+type IpStatus = "idle" | "checking" | "matched" | "unmatched" | "unset";
 
 type Props = {
   initialProfile: UserProfile;
@@ -88,6 +92,9 @@ export function TrackerApp({
   const [stats, setStats] = useState<PeriodStats>(initialStats);
   const [mode, setMode] = useState<DayMark>("office");
   const [isPending, startTransition] = useTransition();
+  const [ipStatus, setIpStatus] = useState<IpStatus>("idle");
+  const [isSavingIp, setIsSavingIp] = useState(false);
+  const ipChecked = useRef(false);
 
   const allPeriods = getAllReportingPeriods();
   const periodIndex = allPeriods.findIndex((p) => p.start === period.start);
@@ -106,6 +113,70 @@ export function TrackerApp({
     setDates(data.dates);
     setStats(data.stats);
     setPeriod(next);
+  }, []);
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  useEffect(() => {
+    if (ipChecked.current) return;
+    ipChecked.current = true;
+    setIpStatus("checking");
+
+    Promise.all([
+      fetch("https://api.ipify.org?format=json")
+        .then((r) => r.json())
+        .then((d: { ip: string }) => d.ip),
+      fetch("/api/office-ip")
+        .then((r) => r.json())
+        .then((d: { officeIp: string | null }) => d.officeIp),
+    ])
+      .then(([currentIp, officeIp]) => {
+        if (!officeIp) {
+          setIpStatus("unset");
+          return;
+        }
+        if (currentIp === officeIp) {
+          setIpStatus("matched");
+          const alreadyMarked =
+            initialDates.inOfficeDates.includes(today) ||
+            initialDates.ptoDates.includes(today) ||
+            initialDates.sickDates.includes(today);
+          if (!alreadyMarked) {
+            fetch("/api/marks", {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ date: today, mark: "office" }),
+            })
+              .then((r) => r.json())
+              .then((body: { dates?: UserDates }) => {
+                if (body.dates) setDates(body.dates);
+              })
+              .catch(() => undefined);
+          }
+        } else {
+          setIpStatus("unmatched");
+        }
+      })
+      .catch(() => setIpStatus("idle"));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const saveOfficeIp = useCallback(async () => {
+    setIsSavingIp(true);
+    try {
+      const { ip } = (await fetch("https://api.ipify.org?format=json").then(
+        (r) => r.json(),
+      )) as { ip: string };
+      const res = await fetch("/api/office-ip", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip }),
+      });
+      if (res.ok) setIpStatus("matched");
+    } catch {
+      // silently fail
+    }
+    setIsSavingIp(false);
   }, []);
 
   const shiftPeriod = useCallback(
@@ -206,6 +277,24 @@ export function TrackerApp({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {ipStatus === "matched" && (
+            <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/30">
+              <Wifi className="h-3 w-3" />
+              Office network
+            </span>
+          )}
+          {ipStatus === "unset" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={saveOfficeIp}
+              disabled={isSavingIp}
+              className="text-slate-300 hover:text-white hover:bg-white/10 text-xs"
+            >
+              <MapPin className="h-3.5 w-3.5" />
+              {isSavingIp ? "Saving…" : "Set as office IP"}
+            </Button>
+          )}
           <Select
             value={profile.country}
             onValueChange={(v) => updateCountry(v as CountryCode)}
