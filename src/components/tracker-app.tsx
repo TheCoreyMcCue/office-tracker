@@ -148,8 +148,16 @@ export function TrackerApp({
               body: JSON.stringify({ date: today, mark: "office" }),
             })
               .then((r) => r.json())
-              .then((body: { dates?: UserDates }) => {
+              .then(async (body: { dates?: UserDates }) => {
                 if (body.dates) setDates(body.dates);
+                const statsRes = await fetch(
+                  `/api/periods/${periodKey(initialPeriod)}`,
+                );
+                if (!statsRes.ok) return;
+                const refreshed = (await statsRes.json()) as {
+                  stats: PeriodStats;
+                };
+                setStats(refreshed.stats);
               })
               .catch(() => undefined);
           }
